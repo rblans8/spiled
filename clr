@@ -1,0 +1,2 @@
+./spiclear -D /dev/spidev0.0
+

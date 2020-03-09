@@ -1,2 +1,2 @@
-gcc -o spitest spi_test.c
+gcc -o spitest spiled.c
 

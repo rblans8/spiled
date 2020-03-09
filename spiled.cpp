@@ -51,14 +51,15 @@ static uint16_t delay;
 // Datasheet says it should be at least 280 us / at 8Mbs, that's 1 us per byte.
 // Hence 280 additional bytes.
 
-static const uint8_t GRID_WIDTH = 16;
-static const uint8_t GRID_HEIGHT = 16;
-static const uint8_t REFRESH_WAIT = 280;
-static const uint8_t BITS_PER_SPI_BYTE = 2;
-static const uint8_t BYTES_PER_LED_BIT = 4;
+static const uint16_t GRID_WIDTH = 16;
+static const uint16_t GRID_HEIGHT = 16;
+static const uint16_t REFRESH_SIZE = 280;
+static const uint16_t BITS_PER_SPI_BYTE = 2;
+static const uint16_t BYTES_PER_LED_BIT = 4;
 
-uint8_t spiTbuf[GRID_WIDTH * GRID_HEIGHT * 3 + 280]; 
-uint8_t spiRbuf[ARRAY_SIZE(spiTbuf)];
+static const uint16_t spiTbuf_SIZE = GRID_WIDTH * GRID_HEIGHT * 3 + 280;
+static uint8_t spiTbuf[spiTbuf_SIZE] = {0, }; 
+static uint8_t spiRbuf[ARRAY_SIZE(spiTbuf)] = {0, };
 
 struct rgbPixel_t
 {
@@ -83,14 +84,14 @@ static void spiGridClear()
 {
     static const uint16_t ROW_MAX = GRID_HEIGHT;
     static const uint16_t COL_MAX = GRID_WIDTH/BITS_PER_SPI_BYTE;
-    static const uint16_t REFRESH_START = ROW_MAX * COL_MAX;
+    static const uint16_t GRID_END = ROW_MAX * COL_MAX;
     uint8_t * p2bits = &spiTbuf[0];
     
-    for (int i = 0; i < REFRESH_START; i++)
+    for (int i = 0; i < GRID_END; i++)
     {
         *p2bits++ = _0_0;
     }
-    for (int i = 0; i < REFRESH_WAIT; i++)
+    for (int i = 0; i < REFRESH_SIZE; i++)
     {
         *p2bits++ = REFRESH;
     }
@@ -107,7 +108,7 @@ static struct spiRgbPixel_t&
         _1_1, 	// 11001100 - represents 11
     };
     
-    for (uint8_t bytePos = BYTES_PER_LED_BIT-1; bytePos > 0; bytePos--)
+    for (uint16_t bytePos = BYTES_PER_LED_BIT-1; bytePos > 0; bytePos--)
     {
         spiPixel.r[bytePos] = mapBits[rgb.r & 0x03];
         rgb.r >>= 2;
@@ -129,6 +130,8 @@ static struct rgbPixel_t
     pixel.g = g;
     pixel.b = b;
     pixel.a = 0;
+    
+    return pixel;
 }
 
 static void rgbGridClear()
@@ -137,7 +140,7 @@ static void rgbGridClear()
     struct rgbPixel_t * pixel = &rgbGrid[0];
     struct rgbPixel_t black;
     
-    black = makeRgbPixel(off, 0, 0, 0);
+    black = makeRgbPixel(black, 0, 0, 0);
     for (int i = 0; i < GRID_AREA; i++)
     {
         *pixel++ = black;
@@ -169,7 +172,7 @@ static void copySpiGridBytes()
 {
     static const uint16_t GRID_END = sizeof(spiGrid);
     static const uint16_t TBUF_END = sizeof(spiTbuf);
-    uint8_t * pBbuf = &spiTbuf[0];
+    uint8_t * pBuf = &spiTbuf[0];
     uint8_t * pSpiGrid = (uint8_t*)(&spiGrid[0]);
     
     for (int i = 0; i < GRID_END; i++)
@@ -180,8 +183,6 @@ static void copySpiGridBytes()
 
 static void gridConvertBits()
 {
-    static const uint16_t REFRESH_START = GRID_HEIGHT * GRID_WIDTH;
-    
     for (int row = 0; row < GRID_HEIGHT; row++)
     {
         for (int col = 0; col < GRID_WIDTH; col++)
@@ -191,11 +192,11 @@ static void gridConvertBits()
                 
             if (row & 1)
             {
-                spiGrid[row * COL_MAX + col] = spiPixel;
+                spiGrid[row * GRID_WIDTH + col] = spiPixel;
             }
             else
             {
-                spiGrid[row * COL_MAX + COL_MAX - col] = spiPixel;
+                spiGrid[row * GRID_WIDTH + GRID_WIDTH - col] = spiPixel;
             }
         }
     }
@@ -206,11 +207,11 @@ static void gridTransfer(int fd)
     int ret;
 
     struct spi_ioc_transfer tr = {
-        .tx_buf = (unsigned long)grid,
-        .rx_buf = (unsigned long)rbuf,
-        .len = ARRAY_SIZE(grid),
-        .delay_usecs = delay,
+        .tx_buf = (unsigned long)spiTbuf,
+        .rx_buf = (unsigned long)spiRbuf,
+        .len = ARRAY_SIZE(spiTbuf),
         .speed_hz = speed,
+        .delay_usecs = delay,
         .bits_per_word = bits,
     };
 
@@ -333,7 +334,7 @@ int main(int argc, char *argv[])
     printf("bits per word: %d\n", bits);
     printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
     
-    gridClear();
+    rgbGridClear();
     
     if (file == NULL)
     {

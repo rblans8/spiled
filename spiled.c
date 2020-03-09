@@ -1,17 +1,17 @@
 /*
- * SPI NEOPixel 16x16 RGB LED display utility (using spidev driver)
- * By Rob Blansett
- *
- * Initially derived from: 
- * SPI testing utility (using spidev driver)
- * Copyright (c) 2007  MontaVista Software, Inc.
- * Copyright (c) 2007  Anton Vorontsov <avorontsov@ru.mvista.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License.
- *
- */
+* SPI NEOPixel 16x16 RGB LED display utility (using spidev driver)
+* By R. Blansett
+*
+* Initially derived from: 
+* SPI testing utility (using spidev driver)
+* Copyright (c) 2007  MontaVista Software, Inc.
+* Copyright (c) 2007  Anton Vorontsov <avorontsov@ru.mvista.com>
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License.
+*
+*/
 
 #include <stdint.h>
 #include <unistd.h>
@@ -34,11 +34,12 @@
 
 static void pabort(const char *s)
 {
-	perror(s);
-	abort();
+    perror(s);
+    abort();
 }
 
 static const char *device = "/dev/spidev0.0";
+static const char *file = NULL;
 static uint8_t mode;
 static uint8_t bits = 8;
 static uint32_t speed = 8000000;
@@ -56,251 +57,297 @@ static const uint8_t REFRESH_WAIT = 280;
 static const uint8_t BITS_PER_SPI_BYTE = 2;
 static const uint8_t BYTES_PER_LED_BIT = 4;
 
-uint8_t spiGrid[GRID_WIDTH * GRID_HEIGHT * 3 + 280]; 
-uint8_t spiRbuf[ARRAY_SIZE(grid)];
+uint8_t spiTbuf[GRID_WIDTH * GRID_HEIGHT * 3 + 280]; 
+uint8_t spiRbuf[ARRAY_SIZE(spiTbuf)];
 
-struct rgbPixel 
+struct rgbPixel_t
 {
-	uint8_t r;
-	uint8_t g;
-	uint8_t b;
-	uint8_t a; // alpha (make it an even number)
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t a; // alpha (make it an even number)
 } rgbGrid[GRID_WIDTH * GRID_HEIGHT];
 
 
-struct spiRgbPixel
+struct spiRgbPixel_t
 {
-	// NOTE: In the LED, Green is first 8 bits, so it's GRB
-	// My scheme requires 4 bytes to make 8 bits:
-	uint8_t g[BYTES_PER_LED_BIT];
-	uint8_t r[BYTES_PER_LED_BIT];
-	uint8_t b[BYTES_PER_LED_BIT];
-};
+    // My scheme requires SPI 4 bytes to make 8 bits:
+    // IMPORTANT: In the LED, Green is first 8 bits, so it's GRB
+    // IMPORTANT: In the 16x16 LED panel, the even rows are order-reversed.
+    uint8_t g[BYTES_PER_LED_BIT];
+    uint8_t r[BYTES_PER_LED_BIT];
+    uint8_t b[BYTES_PER_LED_BIT];
+} spiGrid[GRID_WIDTH * GRID_HEIGHT];
 
-static void makeSpiPixel(spiRgbPixel& pixel, uint8_t r, uint8_t g, uint8_t b)
+static void spiGridClear()
 {
-	uint8_t mapBits [4] = {
-		_0_0,	// 10001000 - represents 00
-		_0_1, 	// 10001100 - represents 01
-		_1_0, 	// 11001000 - represents 10
-		_1_1, 	// 11001100 - represents 11
-	};
-	
-	for (uint8_t bytePos = BYTES_PER_LED_BIT-1; bytePos > 0; bytePos--)
-	{
-		p.r[bytePos] = mapBits[g & 0x03];
-		r >>= 2;
-	
-		p.g[bytePos] = mapBits[g & 0x03];
-		g >>= 2;
-	
-		p.b[bytePos] = mapBits[g & 0x03];
-		b >>= 2;	
-	}
+    static const uint16_t ROW_MAX = GRID_HEIGHT;
+    static const uint16_t COL_MAX = GRID_WIDTH/BITS_PER_SPI_BYTE;
+    static const uint16_t REFRESH_START = ROW_MAX * COL_MAX;
+    uint8_t * p2bits = &spiTbuf[0];
+    
+    for (int i = 0; i < REFRESH_START; i++)
+    {
+        *p2bits++ = _0_0;
+    }
+    for (int i = 0; i < REFRESH_WAIT; i++)
+    {
+        *p2bits++ = REFRESH;
+    }
 }
 
-static void gridClear()
+// NOTE: You have to pass in the spiPixel for this to fill and return.
+static struct spiRgbPixel_t& 
+    makeSpiPixel(struct spiRgbPixel_t& spiPixel, struct rgbPixel_t& rgb)
 {
-	static const uint16_t ROW_MAX = GRID_HEIGHT;
-	static const uint16_t COL_MAX = GRID_WIDTH/BITS_PER_SPI_BYTE;
-	static const uint16_t REFRESH_START = ROW_MAX * COL_MAX;
-	uint8_t * p2bits = &grid[0];
-	
-	for (int i = 0; i < REFRESH_START; i++)
-	{
-		*p2bits++ = _0_0;
-	}
-	for (int i = 0; i < REFRESH_WAIT; i++)
-	{
-		*p2bits++ = REFRESH;
-	}
+    uint8_t mapBits [4] = {
+        _0_0,	// 10001000 - represents 00
+        _0_1, 	// 10001100 - represents 01
+        _1_0, 	// 11001000 - represents 10
+        _1_1, 	// 11001100 - represents 11
+    };
+    
+    for (uint8_t bytePos = BYTES_PER_LED_BIT-1; bytePos > 0; bytePos--)
+    {
+        spiPixel.r[bytePos] = mapBits[rgb.r & 0x03];
+        rgb.r >>= 2;
+    
+        spiPixel.g[bytePos] = mapBits[rgb.g & 0x03];
+        rgb.g >>= 2;
+    
+        spiPixel.b[bytePos] = mapBits[rgb.b & 0x03];
+        rgb.b >>= 2;	
+    }
+    
+    return spiPixel;
 }
 
-static void gridPaint()
+static struct rgbPixel_t 
+    makeRgbPixel(struct rgbPixel_t pixel, uint8_t r, uint8_t g, uint8_t b)
 {
-	static const uint16_t REFRESH_START = GRID_HEIGHT * GRID_WIDTH;
-	uint8_t * p2bits = &grid[0];
-	
-	for (int row = 0; row < GRID_HEIGHT; row++)
-	{
-		for (int col = 0; col < GRID_WIDTH; col++)
-		{
-			*p2bits++ = _0_0;
-			grid[row * COL_MAX + col] = _0_0;
-		}
-	}
-	for (int i = 0; i < REFRESH_WAIT; i++)
-	{
-		grid[REFRESH_START + i] = REFRESH;
-	}
+    pixel.r = r;
+    pixel.g = g;
+    pixel.b = b;
+    pixel.a = 0;
 }
 
+static void rgbGridClear()
+{
+    static const uint16_t GRID_AREA = GRID_HEIGHT * GRID_WIDTH;
+    struct rgbPixel_t * pixel = &rgbGrid[0];
+    struct rgbPixel_t black;
+    
+    black = makeRgbPixel(off, 0, 0, 0);
+    for (int i = 0; i < GRID_AREA; i++)
+    {
+        *pixel++ = black;
+    }
+}
+
+static void rgbGridPattern(int pattern)
+{
+    switch(pattern)
+    {
+        case 0:
+            // Fall through to default case:
+        default:
+            for (int x = 0; x < GRID_WIDTH; x++)
+            {
+                int row = x;
+                int col = x;
+                struct rgbPixel_t color;
+
+                // Make a increasingly brighter BLUE:
+                color = makeRgbPixel(color, 0, 0, 2*x);
+                rgbGrid[row * GRID_WIDTH + col] = color;
+            }
+            break;
+    }
+}
+
+static void copySpiGridBytes()
+{
+    static const uint16_t GRID_END = sizeof(spiGrid);
+    static const uint16_t TBUF_END = sizeof(spiTbuf);
+    uint8_t * pBbuf = &spiTbuf[0];
+    uint8_t * pSpiGrid = (uint8_t*)(&spiGrid[0]);
+    
+    for (int i = 0; i < GRID_END; i++)
+    {
+        *pBuf++ = *pSpiGrid++;
+    }
+}
+
+static void gridConvertBits()
+{
+    static const uint16_t REFRESH_START = GRID_HEIGHT * GRID_WIDTH;
+    
+    for (int row = 0; row < GRID_HEIGHT; row++)
+    {
+        for (int col = 0; col < GRID_WIDTH; col++)
+        {
+            struct spiRgbPixel_t spiPixel
+                = makeSpiPixel(spiPixel, rgbGrid[row * GRID_WIDTH + col]);
+                
+            if (row & 1)
+            {
+                spiGrid[row * COL_MAX + col] = spiPixel;
+            }
+            else
+            {
+                spiGrid[row * COL_MAX + COL_MAX - col] = spiPixel;
+            }
+        }
+    }
+}
 
 static void gridTransfer(int fd)
 {
-	int ret;
+    int ret;
 
-	struct spi_ioc_transfer tr = {
-		.tx_buf = (unsigned long)grid,
-		.rx_buf = (unsigned long)rbuf,
-		.len = ARRAY_SIZE(grid),
-		.delay_usecs = delay,
-		.speed_hz = speed,
-		.bits_per_word = bits,
-	};
+    struct spi_ioc_transfer tr = {
+        .tx_buf = (unsigned long)grid,
+        .rx_buf = (unsigned long)rbuf,
+        .len = ARRAY_SIZE(grid),
+        .delay_usecs = delay,
+        .speed_hz = speed,
+        .bits_per_word = bits,
+    };
 
-	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
-	if (ret < 1)
-		pabort("can't send spi message");
+    // Convert the RGB grid to the SPI RGB grid.
+    gridConvertBits();
+    
+    // Copy to SPI Transmit buffer:
+    // (The REFRESH part of the spiTbuf remains unmodified.)
+    copySpiGridBytes();
+     
+    // SEND IT OUT:
+    ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+    if (ret < 1)
+        pabort("can't send spi message");
 
 #if 0
     // LED is one-way device.
-	for (ret = 0; ret < ARRAY_SIZE(tx); ret++) {
-		if (!(ret % 16))
-			puts("");
-		printf("%.2X ", rx[ret]);
-	}
-	puts("");
+    for (ret = 0; ret < ARRAY_SIZE(tx); ret++) {
+        if (!(ret % 16))
+            puts("");
+        printf("%.2X ", rx[ret]);
+    }
+    puts("");
 #endif	
 }
 
 static void print_usage(const char *prog)
 {
-	printf("Usage: %s [-DsbdlHOLC3]\n", prog);
-	puts("  -D --device   device to use (default /dev/spidev1.1)\n"
-	     "  -s --speed    max speed (Hz)\n"
-	     "  -d --delay    delay (usec)\n"
-	     "  -b --bpw      bits per word \n"
-	     "  -l --loop     loopback\n"
-	     "  -H --cpha     clock phase\n"
-	     "  -O --cpol     clock polarity\n"
-	     "  -L --lsb      least significant bit first\n"
-	     "  -C --cs-high  chip select active high\n"
-	     "  -3 --3wire    SI/SO signals shared\n");
-	exit(1);
+    printf("Usage: %s [-Dsdf]\n", prog);
+    puts("  -D --device   device to use (default /dev/spidev0.0)\n"
+         "  -s --speed    max speed (Hz)\n"
+         "  -d --delay    delay (use)\n"
+         "  -f --file     file (BMP image to load)\n"
+    );
+    exit(1);
 }
 
 static void parse_opts(int argc, char *argv[])
 {
-	while (1) {
-		static const struct option lopts[] = {
-			{ "device",  1, 0, 'D' },
-			{ "speed",   1, 0, 's' },
-			{ "delay",   1, 0, 'd' },
-			{ "bpw",     1, 0, 'b' },
-			{ "loop",    0, 0, 'l' },
-			{ "cpha",    0, 0, 'H' },
-			{ "cpol",    0, 0, 'O' },
-			{ "lsb",     0, 0, 'L' },
-			{ "cs-high", 0, 0, 'C' },
-			{ "3wire",   0, 0, '3' },
-			{ "no-cs",   0, 0, 'N' },
-			{ "ready",   0, 0, 'R' },
-			{ NULL, 0, 0, 0 },
-		};
-		int c;
+    while (1) {
+        static const struct option lopts[] = {
+            { "device",  1, 0, 'D' },
+            { "speed",   1, 0, 's' },
+            { "delay",   1, 0, 'd' },
+            { "file",    1, 0, 'f' },
+            { NULL, 0, 0, 0 },
+        };
+        int c;
 
-		c = getopt_long(argc, argv, "D:s:d:b:lHOLC3NR", lopts, NULL);
+        c = getopt_long(argc, argv, "D:s:d:f", lopts, NULL);
 
-		if (c == -1)
-			break;
+        if (c == -1)
+            break;
 
-		switch (c) {
-		case 'D':
-			device = optarg;
-			break;
-		case 's':
-			speed = atoi(optarg);
-			break;
-		case 'd':
-			delay = atoi(optarg);
-			break;
-		case 'b':
-			bits = atoi(optarg);
-			break;
-		case 'l':
-			mode |= SPI_LOOP;
-			break;
-		case 'H':
-			mode |= SPI_CPHA;
-			break;
-		case 'O':
-			mode |= SPI_CPOL;
-			break;
-		case 'L':
-			mode |= SPI_LSB_FIRST;
-			break;
-		case 'C':
-			mode |= SPI_CS_HIGH;
-			break;
-		case '3':
-			mode |= SPI_3WIRE;
-			break;
-		case 'N':
-			mode |= SPI_NO_CS;
-			break;
-		case 'R':
-			mode |= SPI_READY;
-			break;
-		default:
-			print_usage(argv[0]);
-			break;
-		}
-	}
+        switch (c) {
+        case 'D':
+            device = optarg;
+            break;
+        case 's':
+            speed = atoi(optarg);
+            break;
+        case 'd':
+            delay = atoi(optarg);
+            break;
+        case 'f':
+            file = optarg;
+            break;
+        default:
+            print_usage(argv[0]);
+            break;
+        }
+    }
 }
 
 int main(int argc, char *argv[])
 {
-	int ret = 0;
-	int fd;
+    int ret = 0;
+    int fd;
 
-	parse_opts(argc, argv);
+    parse_opts(argc, argv);
 
-	fd = open(device, O_RDWR);
-	if (fd < 0)
-		pabort("can't open device");
+    fd = open(device, O_RDWR);
+    if (fd < 0)
+        pabort("can't open device");
 
-	/*
-	 * spi mode
-	 */
-	ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
-	if (ret == -1)
-		pabort("can't set spi mode");
+    /*
+    * spi mode
+    */
+    ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
+    if (ret == -1)
+        pabort("can't set spi mode");
 
-	ret = ioctl(fd, SPI_IOC_RD_MODE, &mode);
-	if (ret == -1)
-		pabort("can't get spi mode");
+    ret = ioctl(fd, SPI_IOC_RD_MODE, &mode);
+    if (ret == -1)
+        pabort("can't get spi mode");
 
-	/*
-	 * bits per word
-	 */
-	ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
-	if (ret == -1)
-		pabort("can't set bits per word");
+    /*
+    * bits per word
+    */
+    ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
+    if (ret == -1)
+        pabort("can't set bits per word");
 
-	ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits);
-	if (ret == -1)
-		pabort("can't get bits per word");
+    ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits);
+    if (ret == -1)
+        pabort("can't get bits per word");
 
-	/*
-	 * max speed hz
-	 */
-	ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
-	if (ret == -1)
-		pabort("can't set max speed hz");
+    /*
+    * max speed hz
+    */
+    ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
+    if (ret == -1)
+        pabort("can't set max speed hz");
 
-	ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed);
-	if (ret == -1)
-		pabort("can't get max speed hz");
+    ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed);
+    if (ret == -1)
+        pabort("can't get max speed hz");
 
-	printf("spi mode: %d\n", mode);
-	printf("bits per word: %d\n", bits);
-	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
+    printf("spi mode: %d\n", mode);
+    printf("bits per word: %d\n", bits);
+    printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
+    
+    gridClear();
+    
+    if (file == NULL)
+    {
+        printf("No image file selected. Using default pattern.\n");
+        rgbGridPattern(0);
+    }
+    else 
+    {
+        printf("image file: %s\n", file);
+    }
 
-	gridClear();
-	gridTransfer(fd);
+    gridTransfer(fd);
 
-	close(fd);
+    close(fd);
 
-	return ret;
+    return ret;
 }

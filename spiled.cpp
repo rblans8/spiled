@@ -55,7 +55,7 @@ static const uint16_t GRID_WIDTH = 16;
 static const uint16_t GRID_HEIGHT = 16;
 static const uint16_t REFRESH_SIZE = 280;
 static const uint16_t BITS_PER_SPI_BYTE = 2;
-static const uint16_t BYTES_PER_LED_BIT = 4;
+static const uint16_t SPI_BYTES_PER_BYTE = 4;
 
 static const uint16_t txBuffer_SIZE = GRID_WIDTH * GRID_HEIGHT * 3 + 280;
 static uint8_t txBuffer[txBuffer_SIZE] = {0, }; 
@@ -75,9 +75,9 @@ struct spiRgbPixel_t
     // My scheme requires SPI 4 bytes to make 8 bits:
     // IMPORTANT: In the LED, Green is first 8 bits, so it's GRB
     // IMPORTANT: In the 16x16 LED panel, the even rows are order-reversed.
-    uint8_t g[BYTES_PER_LED_BIT];
-    uint8_t r[BYTES_PER_LED_BIT];
-    uint8_t b[BYTES_PER_LED_BIT];
+    uint8_t g[SPI_BYTES_PER_BYTE];
+    uint8_t r[SPI_BYTES_PER_BYTE];
+    uint8_t b[SPI_BYTES_PER_BYTE];
 } spiGrid[GRID_WIDTH * GRID_HEIGHT];
 
 static void spiGridClear()
@@ -106,8 +106,9 @@ static struct spiRgbPixel_t&
         _1_1, 	// 11001100 - represents 11
     };
 
-    for (uint16_t bytePos = BYTES_PER_LED_BIT-1; bytePos > 0; bytePos--)
+    for (uint16_t bytePos = SPI_BYTES_PER_BYTE-1; bytePos >= 0; bytePos--)
     {
+        // Needs 1 SPI byte per 2 bits of LED color data.
         spiPixel.r[bytePos] = mapBits[rgb.r & 0x03];
         rgb.r >>= 2;
 
@@ -136,6 +137,7 @@ static void rgbGridClear()
 {
     static const uint16_t GRID_AREA = GRID_HEIGHT * GRID_WIDTH;
     struct rgbPixel_t * pPixel = &rgbGrid[0];
+
     struct rgbPixel_t black = makeRgbPixel(black, 0, 0, 0);
 
     for (int i = 0; i < GRID_AREA; i++)
@@ -172,6 +174,7 @@ static void copySpiGridBytes()
     uint8_t * pBuf = &txBuffer[0];
     uint8_t * pSpiGrid = (uint8_t*)(&spiGrid[0]);
 
+    // Note: Could use memcopy here.
     for (int i = 0; i < GRID_END; i++)
     {
         *pBuf++ = *pSpiGrid++;
@@ -332,8 +335,10 @@ int main(int argc, char *argv[])
     printf("bits per word: %d\n", bits);
     printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
+    // 1) Clear the RGB grid
     rgbGridClear();
 
+    // 2) Plot a pattern to the RGB grid
     if (file == NULL)
     {
         printf("No image file selected. Using default pattern.\n");
@@ -344,6 +349,7 @@ int main(int argc, char *argv[])
         printf("image file: %s\n", file);
     }
 
+    // 3) Transfer the grid data out to the real RGB LED Grid.
     gridTransfer(fd);
 
     close(fd);

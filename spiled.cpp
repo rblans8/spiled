@@ -136,6 +136,7 @@ static void rgbGridClear()
 {
     static const uint16_t GRID_AREA = GRID_HEIGHT * GRID_WIDTH;
     struct rgbPixel_t * pPixel = &rgbGrid[0];
+
     struct rgbPixel_t black = makeRgbPixel(black, 0, 0, 0);
 
     for (int i = 0; i < GRID_AREA; i++)

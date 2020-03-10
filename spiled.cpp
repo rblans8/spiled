@@ -58,7 +58,7 @@ static const uint16_t SPI_BYTES_PER_BYTE = 4;
 // Datasheet says it should be at least 280 us / at 8Mbs, that's 1 us per byte.
 // Hence 280 additional bytes.
 
-static const uint16_t txBuffer_SIZE = GRID_WIDTH * GRID_HEIGHT * 3 + 280;
+static const uint16_t txBuffer_SIZE = GRID_WIDTH * GRID_HEIGHT * (3*SPI_BYTES_PER_BYTE) + 280;
 static uint8_t txBuffer[txBuffer_SIZE] = {0, }; 
 static uint8_t rxBuffer[sizeof(txBuffer)] = {0, };
 

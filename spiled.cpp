@@ -2,7 +2,7 @@
 * SPI NEOPixel 16x16 RGB LED display utility (using spidev driver)
 * By R. Blansett
 *
-* Initially derived from: 
+* Initially derived from:
 * SPI testing utility (using spidev driver)
 * Copyright (c) 2007  MontaVista Software, Inc.
 * Copyright (c) 2007  Anton Vorontsov <avorontsov@ru.mvista.com>
@@ -57,9 +57,9 @@ static const uint16_t REFRESH_SIZE = 280;
 static const uint16_t BITS_PER_SPI_BYTE = 2;
 static const uint16_t BYTES_PER_LED_BIT = 4;
 
-static const uint16_t spiTbuf_SIZE = GRID_WIDTH * GRID_HEIGHT * 3 + 280;
-static uint8_t spiTbuf[spiTbuf_SIZE] = {0, }; 
-static uint8_t spiRbuf[ARRAY_SIZE(spiTbuf)] = {0, };
+static const uint16_t txBuffer_SIZE = GRID_WIDTH * GRID_HEIGHT * 3 + 280;
+static uint8_t txBuffer[txBuffer_SIZE] = {0, }; 
+static uint8_t rxBuffer[sizeof(txBuffer)] = {0, };
 
 struct rgbPixel_t
 {
@@ -85,8 +85,8 @@ static void spiGridClear()
     static const uint16_t ROW_MAX = GRID_HEIGHT;
     static const uint16_t COL_MAX = GRID_WIDTH/BITS_PER_SPI_BYTE;
     static const uint16_t GRID_END = ROW_MAX * COL_MAX;
-    uint8_t * p2bits = &spiTbuf[0];
-    
+    uint8_t * p2bits = &txBuffer[0];
+
     for (int i = 0; i < GRID_END; i++)
     {
         *p2bits++ = _0_0;
@@ -107,43 +107,42 @@ static struct spiRgbPixel_t&
         _1_0, 	// 11001000 - represents 10
         _1_1, 	// 11001100 - represents 11
     };
-    
+
     for (uint16_t bytePos = BYTES_PER_LED_BIT-1; bytePos > 0; bytePos--)
     {
         spiPixel.r[bytePos] = mapBits[rgb.r & 0x03];
         rgb.r >>= 2;
-    
+
         spiPixel.g[bytePos] = mapBits[rgb.g & 0x03];
         rgb.g >>= 2;
-    
+
         spiPixel.b[bytePos] = mapBits[rgb.b & 0x03];
-        rgb.b >>= 2;	
+        rgb.b >>= 2;
     }
-    
+
     return spiPixel;
 }
 
-static struct rgbPixel_t 
-    makeRgbPixel(struct rgbPixel_t pixel, uint8_t r, uint8_t g, uint8_t b)
+static struct rgbPixel_t&
+    makeRgbPixel(struct rgbPixel_t& pixel, uint8_t r, uint8_t g, uint8_t b)
 {
     pixel.r = r;
     pixel.g = g;
     pixel.b = b;
     pixel.a = 0;
-    
+
     return pixel;
 }
 
 static void rgbGridClear()
 {
     static const uint16_t GRID_AREA = GRID_HEIGHT * GRID_WIDTH;
-    struct rgbPixel_t * pixel = &rgbGrid[0];
-    struct rgbPixel_t black;
-    
-    black = makeRgbPixel(black, 0, 0, 0);
+    struct rgbPixel_t * pPixel = &rgbGrid[0];
+
+    struct rgbPixel_t black = makeRgbPixel(black, 0, 0, 0);
     for (int i = 0; i < GRID_AREA; i++)
     {
-        *pixel++ = black;
+        *pPixel++ = black;
     }
 }
 
@@ -171,10 +170,10 @@ static void rgbGridPattern(int pattern)
 static void copySpiGridBytes()
 {
     static const uint16_t GRID_END = sizeof(spiGrid);
-    static const uint16_t TBUF_END = sizeof(spiTbuf);
-    uint8_t * pBuf = &spiTbuf[0];
+    static const uint16_t TBUF_END = sizeof(txBuffer);
+    uint8_t * pBuf = &txBuffer[0];
     uint8_t * pSpiGrid = (uint8_t*)(&spiGrid[0]);
-    
+
     for (int i = 0; i < GRID_END; i++)
     {
         *pBuf++ = *pSpiGrid++;
@@ -189,7 +188,7 @@ static void gridConvertBits()
         {
             struct spiRgbPixel_t spiPixel
                 = makeSpiPixel(spiPixel, rgbGrid[row * GRID_WIDTH + col]);
-                
+
             if (row & 1)
             {
                 spiGrid[row * GRID_WIDTH + col] = spiPixel;
@@ -207,9 +206,9 @@ static void gridTransfer(int fd)
     int ret;
 
     struct spi_ioc_transfer tr = {
-        .tx_buf = (unsigned long)spiTbuf,
-        .rx_buf = (unsigned long)spiRbuf,
-        .len = ARRAY_SIZE(spiTbuf),
+        .tx_buf = (unsigned long)txBuffer,
+        .rx_buf = (unsigned long)rxBuffer,
+        .len = sizeof(txBuffer),
         .speed_hz = speed,
         .delay_usecs = delay,
         .bits_per_word = bits,
@@ -217,11 +216,11 @@ static void gridTransfer(int fd)
 
     // Convert the RGB grid to the SPI RGB grid.
     gridConvertBits();
-    
+
     // Copy to SPI Transmit buffer:
-    // (The REFRESH part of the spiTbuf remains unmodified.)
+    // (The REFRESH part of the txBuffer remains unmodified.)
     copySpiGridBytes();
-     
+
     // SEND IT OUT:
     ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
     if (ret < 1)
@@ -229,13 +228,13 @@ static void gridTransfer(int fd)
 
 #if 0
     // LED is one-way device.
-    for (ret = 0; ret < ARRAY_SIZE(tx); ret++) {
+    for (ret = 0; ret < sizeof(tx); ret++) {
         if (!(ret % 16))
             puts("");
         printf("%.2X ", rx[ret]);
     }
     puts("");
-#endif	
+#endif
 }
 
 static void print_usage(const char *prog)
@@ -333,15 +332,15 @@ int main(int argc, char *argv[])
     printf("spi mode: %d\n", mode);
     printf("bits per word: %d\n", bits);
     printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
-    
+
     rgbGridClear();
-    
+
     if (file == NULL)
     {
         printf("No image file selected. Using default pattern.\n");
-        rgbGridPattern(0);
+        //rgbGridPattern(0);
     }
-    else 
+    else
     {
         printf("image file: %s\n", file);
     }

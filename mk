@@ -1,2 +1,1 @@
-gcc -o spitest spiled.c
-
+gcc -o spitest spiled.cpp

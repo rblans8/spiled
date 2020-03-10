@@ -193,11 +193,11 @@ static void gridConvertBits()
 
             if (row & 1)
             {
-                spiGrid[row * GRID_WIDTH + col] = spiPixel;
+                spiGrid[row * GRID_WIDTH + MAX_COL - col] = spiPixel;
             }
             else
             {
-                spiGrid[row * GRID_WIDTH + MAX_COL - col] = spiPixel;
+                spiGrid[row * GRID_WIDTH + col] = spiPixel;
             }
         }
     }

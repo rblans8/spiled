@@ -22,6 +22,8 @@
 #include <sys/ioctl.h>
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
+#include "yoda16x16x24bit.h"
+
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -254,9 +256,20 @@ static void rgbGridPattern(int pattern)
             }
             break;
 
+        case 99:
+            for (int i = 0; i < GRID_WIDTH*GRID_HEIGHT*3; i += 3)
+            {
+                rgbPixel_t color = makeRgbPixel(color, 
+                    yoda16x16x24bit[i],         // red
+                    yoda16x16x24bit[i+1],       // grn
+                    yoda16x16x24bit[i+2]);      // blu
+
+                rgbGrid[i] = color;
+            }
+
         case -1:
         default:
-            printf("UNKNOWN pattern: %d.  Using default: Blue diag.\n");
+            printf("UNKNOWN pattern: %d.  Using default: Blue diag.\n", pattern);
             for (int x = 0; x < GRID_WIDTH; x++)
             {
                 // Make a increasingly brighter BLUE 

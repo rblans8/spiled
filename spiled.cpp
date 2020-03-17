@@ -22,6 +22,8 @@
 #include <sys/ioctl.h>
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
+#include <math.h>
+#include <time.h>
 
 #include "yoda16x16x24bit.h"
 #include "redball16x16x24bit.h"
@@ -84,6 +86,10 @@ struct spiRgbPixel_t
     uint8_t r[SPI_BYTES_PER_BYTE];
     uint8_t b[SPI_BYTES_PER_BYTE];
 } spiGrid[GRID_WIDTH * GRID_HEIGHT];
+
+
+static void gridTransfer(int fd);
+
 
 static void spiGridClear()
 {
@@ -155,7 +161,7 @@ static void rgbGridClear()
     }
 }
 
-static void rgbGridPattern(int pattern)
+static void rgbGridPattern(int fd, int pattern)
 {
     switch(pattern)
     {
@@ -258,6 +264,32 @@ static void rgbGridPattern(int pattern)
             }
             break;
 
+        case 97:
+            // Make a sine wave moderated color movement:
+            for (int pass = 0; pass < 6283; pass++)
+            {
+                for (int row = 0; row < GRID_HEIGHT; row++)
+                {
+                    for (int col = 0; col < GRID_WIDTH; col++)
+                    {
+                        const float K = 3.1415*3.0/2.0;
+                        int x = 32 - int(32 * sin(K + pass/10.0 + row + col));
+                        rgbPixel_t color = makeRgbPixel(color, 0, 0, x);
+                        rgbGrid[row * GRID_WIDTH + col] = color;
+                    }
+                }
+                // Transfer the grid data out to the real RGB LED Grid.
+                gridTransfer(fd);
+
+                // Wait a while..
+                static struct timespec sleeptime;
+                sleeptime.tv_sec  = 0;
+                sleeptime.tv_nsec = 16700000L; // 16.7ms
+                //sleeptime.tv_nsec = 100000000L; // 100ms
+                nanosleep(&sleeptime, NULL);
+            }
+            break;
+            
         case 98:
         {
             int gridPos = 0;
@@ -551,7 +583,7 @@ int main(int argc, char *argv[])
     if (file == NULL)
     {
         printf("No image file selected. Using pattern: %d\n", pattern);
-        rgbGridPattern(pattern);
+        rgbGridPattern(fd, pattern);
     }
     else
     {

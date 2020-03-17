@@ -22,7 +22,9 @@
 #include <sys/ioctl.h>
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
+
 #include "yoda16x16x24bit.h"
+#include "redball16x16x24bit.h"
 
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -132,9 +134,9 @@ static spiRgbPixel_t&
 static rgbPixel_t&
     makeRgbPixel(rgbPixel_t& pixel, uint8_t r, uint8_t g, uint8_t b)
 {
-    pixel.r = r;
-    pixel.g = g;
-    pixel.b = b;
+    pixel.r = r < 64? r : 64;
+    pixel.g = g < 64? g : 64;
+    pixel.b = b < 64? b : 64;
     pixel.a = 0;
 
     return pixel;
@@ -256,16 +258,35 @@ static void rgbGridPattern(int pattern)
             }
             break;
 
-        case 99:
+        case 98:
+        {
+            int gridPos = 0;
             for (int i = 0; i < GRID_WIDTH*GRID_HEIGHT*3; i += 3)
             {
                 rgbPixel_t color = makeRgbPixel(color, 
-                    yoda16x16x24bit[i],         // red
-                    yoda16x16x24bit[i+1],       // grn
-                    yoda16x16x24bit[i+2]);      // blu
+                    redball16x16x24bit[i] >> 2,         // red
+                    redball16x16x24bit[i+1] >> 2,       // grn
+                    redball16x16x24bit[i+2] >> 2);      // blu
 
-                rgbGrid[i] = color;
+                rgbGrid[gridPos++] = color;
             }
+            break;
+        }
+
+        case 99:
+        {
+            int gridPos = 0;
+            for (int i = 0; i < GRID_WIDTH*GRID_HEIGHT*3; i += 3)
+            {
+                rgbPixel_t color = makeRgbPixel(color, 
+                    yoda16x16x24bit[i] >> 2,         // red
+                    yoda16x16x24bit[i+1] >> 2,       // grn
+                    yoda16x16x24bit[i+2] >> 2);      // blu
+
+                rgbGrid[gridPos++] = color;
+            }
+            break;
+        }
 
         case -1:
         default:
@@ -543,7 +564,7 @@ int main(int argc, char *argv[])
     // 4) Get some DEBUG OUT
     dumpRgbGrid();
     dumpSpiGrid();
-    dumpTxBuffer();
+    //dumpTxBuffer();
     
     close(fd);
 
